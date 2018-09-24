@@ -41,13 +41,24 @@ const int LED_PAUSE_PIN = 18;
 // APA102 -> SPI driver
 Apa102 leds(LED_COUNT, CLK_PIN, DATA_PIN, DoubleBuffer);
 // SmartLed ring( LED_WS2812, RING_COUNT, RING_PIN, CHANNEL, DoubleBuffer );
+
+
+// Flower Drawing Settings
+const int FLOWER_PETALS = 8;
+const int PETAL_OFFET = 30;
+
+float flowerLastRoll = 0;
+float flowerCurrentOffset = 0;
+
 uint8_t hue_offset = 0;
 
 uint8_t random_hues[LED_COUNT] {0};
 
+const int MODE_DISPLAY_TIME = 1500;
 const int MODE_SWITCH_TIME = 200;
 int lastModeMillis = 0;
 uint8_t ledMode = 0;
+int modeShowTime = 0;
 
 void writeRGB(Rgb color) {
     for(int i = 0; i < LED_COUNT; i++){
@@ -59,6 +70,13 @@ void writeRGB(Rgb color) {
 void writeHSV(Hsv color) {
     for(int i = 0; i < LED_COUNT; i++){
         leds[i] = color;
+    }
+    leds.show();
+}
+
+void writeRedRoll(uint8_t pos) {
+    for(int i = 0; i < LED_COUNT; i++) {
+        leds[i] = Rgb{map(pos, 0, 255, 0, 30), 10, 10};
     }
     leds.show();
 }
@@ -88,8 +106,43 @@ void writeBand(uint8_t pos, uint8_t hue) {
     leds.show();
 }
 
+void writeRainbowAccelZ() {
+    uint8_t pos = map(aa.y, 0, 6000, 0, 144) + 72 % 144;
+    uint8_t hue = (millis() >> 4) % 255;
+    for(int i = 0; i < LED_COUNT; i++){
+        if(i > pos - 5 && i < pos + 5) {
+            leds[i] = Hsv{(hue) % 255, 255, constrain(30 - (abs(pos - i) * 6), 1, 30)};
+        } else {
+            leds[i] = Rgb{0,0,0};
+        }
+    }
+    leds.show();
+}
+
+void writeFlowerOffset(float *ypr) {
+    if(ypr[2] > 1 && flowerLastRoll < 1) {
+        if(flowerCurrentOffset < 1.5) {
+            flowerCurrentOffset += 0.1;
+        } else {
+            flowerCurrentOffset == 0;
+        }
+    }
+
+    uint8_t pos = (uint8_t)(sin(((ypr[2] + flowerCurrentOffset) * FLOWER_PETALS) + HALF_PI) * 64) + 72;
+    uint8_t hue = (uint8_t)((ypr[1] + HALF_PI) * (255.0 / PI));
+    for(int i = 0; i < LED_COUNT; i++){
+        if(i > pos - 5 && i < pos + 5) {
+            leds[i] = Hsv{(hue) % 255, 255, constrain(30 - (abs(pos - i) * 6), 1, 30)};
+        } else {
+            leds[i] = Rgb{0,0,0};
+        }
+    }
+    leds.show();
+    flowerLastRoll = ypr[2];
+}
+
 void writeFlower(float *ypr) {
-    uint8_t pos = (uint8_t)(sin((ypr[2] * 8) + HALF_PI) * 72) + 72;
+    uint8_t pos = (uint8_t)(sin((ypr[2] * FLOWER_PETALS) + HALF_PI) * 64) + 72;
     uint8_t hue = (uint8_t)((ypr[1] + HALF_PI) * (255.0 / PI));
     for(int i = 0; i < LED_COUNT; i++){
         if(i > pos - 5 && i < pos + 5) {
@@ -102,14 +155,54 @@ void writeFlower(float *ypr) {
 }
 
 void writeRandomBand(uint8_t pos, uint8_t hue) {
-    uint8_t timeHue = (millis() << 9) % 255;
+    uint8_t timeHue = (millis() >> 3) % 255;
 
     for(int i = 0; i < LED_COUNT; i++){
         if(i > pos - 5 && i < pos + 5) {
-            leds[i] = Hsv{timeHue, 255, constrain((millis() << 5) % 30, 1, 30) };
+            leds[i] = Hsv{timeHue, 255, constrain(abs(30 -(millis() >> 4) % 60), 1, 30) };
         }
     }
     leds.show();
+}
+
+void peteToy() {
+    uint8_t pos = constrain((abs(aa.z) >> 3)  % 144, 1, 144);
+    uint8_t hue = aa.y % 255;
+
+    for(int i = 0; i < LED_COUNT; i++){
+        if(i > pos - 2 && i < pos + 2) {
+            leds[i] = Hsv{(hue) % 255, 255, constrain(30 - (abs(pos - i) * 6), 1, 30)};
+        } else {
+            leds[i] = Rgb{0,0,0};
+        }
+    }
+    leds.show();
+}
+
+void writeTimeSine(int millis) {
+    uint8_t pos = constrain((sin((((millis >> 5) % 288) / 288.0) * TWO_PI) * 72) + 72 + abs(aa.x >> 6 & 15), 1, 143);
+    uint8_t hue = (millis >> 5) % 255;
+    for(int i = 0; i < LED_COUNT; i++){
+        if(i > pos - 5 && i < pos + 5) {
+            leds[i] = Hsv{(hue) % 255, 255, constrain(30 - (abs(pos - i) * 6), 1, 30)};
+        } else {
+            leds[i] = Rgb{0,0,0};
+        }
+    }
+    leds.show();
+
+}
+
+void writeMode(uint8_t mode) {
+    for(int i = 0; i < LED_COUNT; i++) {
+        if(i < 2 * mode && i % 2 == 0) {
+            leds[i] = Hsv{i, 255, 10};
+        } else {
+            leds[i] = Rgb{0,0,0};
+        }
+    }
+    leds.show();
+    modeShowTime = millis();
 }
 
 void clearStrip() {
@@ -134,7 +227,7 @@ void connectMPU() {
     Serial.println(mpu.testConnection() ? F("MPU6050 connection successful") : F("MPU6050 connection failed"));
 
     // load and configure the DMP
-    Serial.println(F("Initializing DMP..."));
+    Serial.println(F("Initializing DMP.."));
     devStatus = mpu.dmpInitialize();
 
     // supply your own gyro offsets here, scaled for min sensitivity
@@ -190,6 +283,7 @@ void setup() {
 
 
     clearStrip();
+    ledMode = 9;
 }
 
 void loop() {
@@ -250,6 +344,7 @@ void loop() {
     // writeRGB(Rgb{(uint8_t)(constrain(ypr[0] * 32, 2, 100)), (uint8_t)(constrain(ypr[1] * 32, 2, 100)), (uint8_t)(constrain(ypr[2] * 32, 2, 100))});
     uint8_t roll8 = (uint8_t)((ypr[2] + 1.37) * (512.0 / 2.78)) + 128 + hue_offset;
     uint8_t led_pos = (uint8_t)((ypr[2] + 1.37) * (144.0 / 2.78));
+    // if(digitalRead(LED_PAUSE_PIN) && loopMillis > modeShowTime + MODE_DISPLAY_TIME) {
     if(digitalRead(LED_PAUSE_PIN)) {
         switch (ledMode) {
             case 0:
@@ -270,6 +365,18 @@ void loop() {
             case 5:
                 writeRandomBand(led_pos, roll8);
                 break;
+            case 6:
+                writeFlowerOffset(ypr);
+                break;
+            case 7:
+                writeRainbowAccelZ();
+                break;
+            case 8:
+                peteToy();
+                break;
+            case 9:
+                writeTimeSine(loopMillis);
+                break;
             default: 
                 ledMode = 0;
     
@@ -281,8 +388,11 @@ void loop() {
         if(!digitalRead(0) && loopMillis > (lastModeMillis + MODE_SWITCH_TIME)) {
             lastModeMillis = loopMillis;
             ledMode++;
+            writeMode(ledMode);
         }
-        writeRGB(Rgb{0,0,0});
+        if(loopMillis > modeShowTime + MODE_DISPLAY_TIME) {
+            writeRGB(Rgb{0,0,0});
+        }
     }
     // Serial.println(ypr[2]);
     // Serial.println(roll8);
